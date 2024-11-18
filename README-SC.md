@@ -1,12 +1,16 @@
+<!--
+ * @Author: FunctionSir
+ * @License: AGPLv3
+ * @Date: 2024-11-18 18:05:22
+ * @LastEditTime: 2024-11-18 20:06:02
+ * @LastEditors: FunctionSir
+ * @Description: -
+ * @FilePath: /repo-donkey/README-SC.md
+-->
+
 # repo-donkey
 
-**[\[ 让我们说中文 \]](README-SC.md)**
-
-Help you to build your own Arch Linux repo based on AUR.
-
-## i18n is not completed yet
-
-Please use the Chinese version, sorry for that...
+**[\[ Let's speak English \]](README.md)**
 
 ## 这是什么
 
