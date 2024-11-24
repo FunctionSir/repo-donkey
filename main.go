@@ -2,7 +2,7 @@
  * @Author: FunctionSir
  * @License: AGPLv3
  * @Date: 2024-11-16 23:40:46
- * @LastEditTime: 2024-11-18 19:39:27
+ * @LastEditTime: 2024-11-24 16:01:24
  * @LastEditors: FunctionSir
  * @Description: -
  * @FilePath: /repo-donkey/main.go
@@ -33,15 +33,16 @@ const CODENAME string = "UiharuKazari"
 
 // For each task.
 type Task struct {
-	Package   string
-	Schedule  string
-	CloneDir  string
-	TargetDB  string
-	Proxy     string
-	User      string
-	Group     string
-	UseChroot bool
-	Sign      bool
+	Package       string
+	Schedule      string
+	CloneDir      string
+	TargetDB      string
+	Proxy         string
+	User          string
+	Group         string
+	UseChroot     bool
+	Sign          bool
+	SkipInitBuild bool
 }
 
 // Config loaded.
@@ -55,6 +56,10 @@ var Tasks []Task
 // Skip init build.
 // This should not be changed after config is loaded, or might cause data race!
 var SkipInitBuild bool = false
+
+// Debug mode or not.
+// This should not be changed after config is loaded, or might cause data race!
+var DebugMode bool = false
 
 // For tmp files
 var TmpFiles []string
@@ -111,6 +116,7 @@ func printHelp() {
 	fmt.Println("-c --config: Specify config file to use.")
 	fmt.Println("--no-color: Disable color output (may not affect paru or others).")
 	fmt.Println("-s --sikp-init-build: Skip init build.")
+	fmt.Println("--debug: Enable debug features.")
 	fmt.Println("-h --help: Print this help.")
 	fmt.Println("Any unknown args will be ignored with no warning.")
 	fmt.Println("To learn more, read the README file (on GitHub or stored in your computer).")
@@ -131,6 +137,8 @@ func getConfig() {
 			color.NoColor = true
 		case "-s", "--sikp-init-build":
 			SkipInitBuild = true
+		case "--debug":
+			DebugMode = true
 		case "-h", "--help":
 			printHelp()
 		}
@@ -183,7 +191,7 @@ func getConfig() {
 		curTask.Proxy = ""
 		if sec.HasKey("Proxy") {
 			curTask.Proxy = sec.Key("Proxy").String()
-			curTask.Proxy = strings.ReplaceAll(curTask.Proxy, ":\\", " ")
+			curTask.Proxy = strings.ReplaceAll(curTask.Proxy, "://", " ")
 			curTask.Proxy = strings.ReplaceAll(curTask.Proxy, ":", " ")
 		}
 		// Use chroot or not //
@@ -203,6 +211,15 @@ func getConfig() {
 				LogFatalln("Value of key \"Sign\" can not be parsed: " + err.Error())
 			}
 			curTask.Sign = tmp
+		}
+		// Skip initial build //
+		curTask.SkipInitBuild = false
+		if sec.HasKey("SkipInitBuild") {
+			tmp, err := ValueToBool(sec.Key("SkipInitBuild").String())
+			if err != nil {
+				LogFatalln("Value of key \"SkipInitBuild\" can not be parsed: " + err.Error())
+			}
+			curTask.SkipInitBuild = tmp
 		}
 		// Append to list //
 		Tasks = append(Tasks, curTask)
@@ -244,6 +261,11 @@ func builder(task *Task) {
 	}
 	args = append(args, "--clonedir", task.CloneDir, "-S", task.Package)
 	cmd = exec.Command(program, args...)
+	if DebugMode {
+		LogInfoln(program + " " + strings.Join(args, " "))
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
 	err := cmd.Run()
 	if err != nil {
 		LogWarnln("Can not finish job for package \"" + task.Package + "\": " + err.Error())
@@ -256,7 +278,7 @@ func builder(task *Task) {
 		LogWarnln("Can not finish job for package \"" + task.Package + "\": " + err.Error())
 		return
 	}
-	var genedFile string = ""
+	genedFiles := make([]string, 0)
 	for _, x := range entries {
 		var flagPkg bool = false
 		var flagSig bool = false
@@ -277,6 +299,11 @@ func builder(task *Task) {
 		}
 		if flagPkg || flagSig {
 			cmd := exec.Command("cp", "-f", "--update=older", path.Join(buildBase, x.Name()), path.Dir(task.TargetDB))
+			if DebugMode {
+				LogInfoln("cp -f --update=older " + path.Join(buildBase, x.Name()) + " " + path.Dir(task.TargetDB))
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+			}
 			err := cmd.Run()
 			if err != nil {
 				LogWarnln("Can not finish job for package \"" + task.Package + "\": " + err.Error())
@@ -284,24 +311,32 @@ func builder(task *Task) {
 			}
 		}
 		if flagPkg {
-			genedFile = path.Join(buildBase, x.Name())
+			genedFiles = append(genedFiles, path.Join(buildBase, x.Name()))
 		}
 	}
 	// Do repo-add //
-	args = make([]string, 0)
-	if color.NoColor {
-		args = append(args, "--nocolor")
-	}
-	args = append(args, "-R")
-	if task.Sign {
-		args = append(args, "-v", "-s")
-	}
-	args = append(args, task.TargetDB, genedFile)
-	cmd = exec.Command("repo-add", args...)
-	err = cmd.Run()
-	if err != nil {
-		LogWarnln("Can not finish job for package \"" + task.Package + "\": " + err.Error())
-		return
+	for _, x := range genedFiles {
+		args = make([]string, 0)
+		args = append(args, "-u", task.User, "-g", task.Group, "repo-add")
+		if color.NoColor {
+			args = append(args, "--nocolor")
+		}
+		args = append(args, "-R")
+		if task.Sign {
+			args = append(args, "-v", "-s")
+		}
+		args = append(args, task.TargetDB, x)
+		cmd = exec.Command("sudo", args...)
+		if DebugMode {
+			LogInfoln("sudo " + strings.Join(args, " "))
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+		}
+		err = cmd.Run()
+		if err != nil {
+			LogWarnln("Can not finish job for package \"" + task.Package + "\": " + err.Error())
+			return
+		}
 	}
 	LogInfoln("Job for package \"" + task.Package + "\" done")
 }
@@ -318,7 +353,7 @@ func main() {
 	c := cron.New(cron.WithChain(cron.SkipIfStillRunning(cron.DefaultLogger)), cron.WithSeconds())
 	for _, x := range Tasks {
 		c.AddFunc(x.Schedule, func() { builder(&x) })
-		if !SkipInitBuild {
+		if !SkipInitBuild && !x.SkipInitBuild {
 			LogInfoln("Started inital build of package " + x.Package)
 			builder(&x)
 		}
