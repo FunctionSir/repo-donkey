@@ -38,6 +38,7 @@ repo-donkey -c test.conf
 -c --config: 指定要使用的配置文件. 这是必需的.
 --no-color: 禁用颜色输出. 这可能对某些东西如Paru无效.
 -s --sikp-init-build: 跳过启动后进行的一次非并行构建.
+--debug: 调试模式.
 -h --help: 输出帮助信息.
 ```
 

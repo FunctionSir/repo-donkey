@@ -2,7 +2,7 @@
  * @Author: FunctionSir
  * @License: AGPLv3
  * @Date: 2024-11-16 23:40:46
- * @LastEditTime: 2024-11-24 16:01:24
+ * @LastEditTime: 2024-11-29 20:31:52
  * @LastEditors: FunctionSir
  * @Description: -
  * @FilePath: /repo-donkey/main.go
@@ -28,7 +28,7 @@ import (
 	"gopkg.in/ini.v1"
 )
 
-const VER string = "0.0.1"
+const VER string = "0.0.2"
 const CODENAME string = "UiharuKazari"
 
 // For each task.
@@ -45,13 +45,17 @@ type Task struct {
 	SkipInitBuild bool
 }
 
+// Log Dir.
+// This should not be changed after config is loaded, or might cause data race!
+var LogDir string = ""
+
 // Config loaded.
 // This should not be changed after config is loaded, or might cause data race!
-var Config *ini.File
+var Config *ini.File = nil
 
 // Tasks.
 // This should not be changed after config is loaded, or might cause data race!
-var Tasks []Task
+var Tasks []Task = nil
 
 // Skip init build.
 // This should not be changed after config is loaded, or might cause data race!
@@ -106,7 +110,7 @@ func ValueToBool(s string) (bool, error) {
 		return true, nil
 	}
 	if s == "false" || s == "False" || s == "F" || s == "f" || s == "0" {
-		return true, nil
+		return false, nil
 	}
 	return false, errors.New("ValueToBool: illegal string " + s)
 }
@@ -123,6 +127,16 @@ func printHelp() {
 	os.Exit(0)
 }
 
+func vitalKeyOrGeneral(sec *ini.Section, general *ini.Section, key string) string {
+	if sec.HasKey(key) {
+		return sec.Key(key).String()
+	}
+	if general == nil || !general.HasKey(key) {
+		LogFatalln("No key \"" + key + "\" found in section \"" + sec.Name() + "\" or \"GENERAL\" but key \"" + key + "\" is necessary")
+	}
+	return general.Key(key).String()
+}
+
 func getConfig() {
 	var confFile string = ""
 	Tasks = make([]Task, 0)
@@ -135,6 +149,11 @@ func getConfig() {
 			confFile = os.Args[i+1]
 		case "--no-color":
 			color.NoColor = true
+		case "-l", "--log-dir":
+			if i+1 >= len(os.Args) {
+				LogFatalln("No log dir specified")
+			}
+			LogDir = os.Args[i+1]
 		case "-s", "--sikp-init-build":
 			SkipInitBuild = true
 		case "--debug":
@@ -151,44 +170,36 @@ func getConfig() {
 	if err != nil {
 		LogFatalln("Error occurred during loading the config file: " + err.Error())
 	}
+	var general *ini.Section = nil
+	if Config.HasSection("GENERAL") {
+		general = Config.Section("GENERAL")
+	}
 	for _, sec := range Config.Sections() {
 		// Skip section DEFAULT //
-		if sec.Name() == "DEFAULT" {
+		if sec.Name() == "DEFAULT" || sec.Name() == "GENERAL" {
 			continue
 		}
 		var curTask Task
 		// Name //
 		curTask.Package = sec.Name()
 		// Schedule //
-		if !sec.HasKey("Schedule") {
-			LogFatalln("No key \"Schedule\" found in section \"" + sec.Name() + "\" but key \"Schedule\" is necessary")
-		}
-		curTask.Schedule = sec.Key("Schedule").String()
+		curTask.Schedule = vitalKeyOrGeneral(sec, general, "Schedule")
 		if len(strings.Split(curTask.Schedule, " ")) == 5 {
 			curTask.Schedule = "0 " + curTask.Schedule
 		}
-		// Build dir //
-		if !sec.HasKey("CloneDir") {
-			LogFatalln("No key \"CloneDir\" found in section \"" + sec.Name() + "\" but key \"CloneDir\" is necessary")
-		}
-		curTask.CloneDir = sec.Key("CloneDir").String()
+		// Clone dir //
+		curTask.CloneDir = vitalKeyOrGeneral(sec, general, "CloneDir")
 		// Target DB //
-		if !sec.HasKey("TargetDB") {
-			LogFatalln("No key \"TargetDB\" found in section \"" + sec.Name() + "\" but key \"TargetDB\" is necessary")
-		}
-		curTask.TargetDB = sec.Key("TargetDB").String()
+		curTask.TargetDB = vitalKeyOrGeneral(sec, general, "TargetDB")
 		// User //
-		if !sec.HasKey("User") {
-			LogFatalln("No key \"User\" found in section \"" + sec.Name() + "\" but key \"User\" is necessary")
-		}
-		curTask.User = sec.Key("User").String()
+		curTask.User = vitalKeyOrGeneral(sec, general, "User")
 		// Group //
-		if !sec.HasKey("Group") {
-			LogFatalln("No key \"Group\" found in section \"" + sec.Name() + "\" but key \"Group\" is necessary")
-		}
-		curTask.Group = sec.Key("Group").String()
+		curTask.Group = vitalKeyOrGeneral(sec, general, "Group")
 		// Proxy config //
 		curTask.Proxy = ""
+		if general != nil && general.HasKey("Proxy") {
+			curTask.Proxy = general.Key("Proxy").String()
+		}
 		if sec.HasKey("Proxy") {
 			curTask.Proxy = sec.Key("Proxy").String()
 			curTask.Proxy = strings.ReplaceAll(curTask.Proxy, "://", " ")
@@ -196,6 +207,14 @@ func getConfig() {
 		}
 		// Use chroot or not //
 		curTask.UseChroot = false
+		if general != nil && general.HasKey("UseChroot") {
+			tmpStr := general.Key("UseChroot").String()
+			tmp, err := ValueToBool(tmpStr)
+			if err != nil {
+				LogFatalln("Value of key \"UseChroot\" in \"GENERAL\" can not be parsed: " + err.Error())
+			}
+			curTask.UseChroot = tmp
+		}
 		if sec.HasKey("UseChroot") {
 			tmp, err := ValueToBool(sec.Key("UseChroot").String())
 			if err != nil {
@@ -205,6 +224,14 @@ func getConfig() {
 		}
 		// Sign or not //
 		curTask.Sign = false
+		if general != nil && general.HasKey("Sign") {
+			tmpStr := general.Key("Sign").String()
+			tmp, err := ValueToBool(tmpStr)
+			if err != nil {
+				LogFatalln("Value of key \"Sign\" in \"GENERAL\" can not be parsed: " + err.Error())
+			}
+			curTask.Sign = tmp
+		}
 		if sec.HasKey("Sign") {
 			tmp, err := ValueToBool(sec.Key("Sign").String())
 			if err != nil {
@@ -214,6 +241,14 @@ func getConfig() {
 		}
 		// Skip initial build //
 		curTask.SkipInitBuild = false
+		if general != nil && general.HasKey("SkipInitBuild") {
+			tmpStr := general.Key("SkipInitBuild").String()
+			tmp, err := ValueToBool(tmpStr)
+			if err != nil {
+				LogFatalln("Value of key \"SkipInitBuild\" in \"GENERAL\" can not be parsed: " + err.Error())
+			}
+			curTask.SkipInitBuild = tmp
+		}
 		if sec.HasKey("SkipInitBuild") {
 			tmp, err := ValueToBool(sec.Key("SkipInitBuild").String())
 			if err != nil {
@@ -223,6 +258,17 @@ func getConfig() {
 		}
 		// Append to list //
 		Tasks = append(Tasks, curTask)
+	}
+	if LogDir == "" {
+		LogFatalln("LogDir not specified, do not know where to put logs")
+	}
+}
+
+func writeFailLog(task string, combinedOutput []byte) {
+	logFile := path.Join(LogDir, task+".fail.latest.log")
+	err := os.WriteFile(logFile, combinedOutput, os.ModePerm)
+	if err != nil {
+		LogWarnln("Can not write log file \"" + logFile + "\": " + err.Error())
 	}
 }
 
@@ -261,14 +307,14 @@ func builder(task *Task) {
 	}
 	args = append(args, "--clonedir", task.CloneDir, "-S", task.Package)
 	cmd = exec.Command(program, args...)
+	outputAsBytes, err := cmd.CombinedOutput()
 	if DebugMode {
-		LogInfoln(program + " " + strings.Join(args, " "))
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		LogInfoln(program + " " + strings.Join(args, " ") + " done")
+		fmt.Print(string(outputAsBytes))
 	}
-	err := cmd.Run()
 	if err != nil {
 		LogWarnln("Can not finish job for package \"" + task.Package + "\": " + err.Error())
+		writeFailLog(task.Package, outputAsBytes)
 		return
 	}
 	// Copy gened package //
@@ -284,11 +330,17 @@ func builder(task *Task) {
 		var flagSig bool = false
 		if !x.IsDir() {
 			var err error
-			flagPkg, err = regexp.MatchString("^"+task.Package+".*.pkg.tar.zst$", x.Name())
+			conA, err := regexp.MatchString("^"+task.Package+".*.pkg.tar.zst$", x.Name())
 			if err != nil {
 				LogWarnln("Can not finish job for package \"" + task.Package + "\": " + err.Error())
 				return
 			}
+			conB, err := regexp.MatchString("^"+task.Package+"-debug.*.pkg.tar.zst$", x.Name())
+			if err != nil {
+				LogWarnln("Can not finish job for package \"" + task.Package + "\": " + err.Error())
+				return
+			}
+			flagPkg = conA && !conB
 			if task.Sign {
 				flagSig, err = regexp.MatchString("^"+task.Package+".*.pkg.tar.zst.sig$", x.Name())
 				if err != nil {
@@ -299,14 +351,14 @@ func builder(task *Task) {
 		}
 		if flagPkg || flagSig {
 			cmd := exec.Command("cp", "-f", "--update=older", path.Join(buildBase, x.Name()), path.Dir(task.TargetDB))
+			outputAsBytes, err := cmd.CombinedOutput()
 			if DebugMode {
-				LogInfoln("cp -f --update=older " + path.Join(buildBase, x.Name()) + " " + path.Dir(task.TargetDB))
-				cmd.Stdout = os.Stdout
-				cmd.Stderr = os.Stderr
+				LogInfoln("cp -f --update=older " + path.Join(buildBase, x.Name()) + " " + path.Dir(task.TargetDB) + " done")
+				fmt.Print(string(outputAsBytes))
 			}
-			err := cmd.Run()
 			if err != nil {
 				LogWarnln("Can not finish job for package \"" + task.Package + "\": " + err.Error())
+				writeFailLog(task.Package, outputAsBytes)
 				return
 			}
 		}
@@ -327,14 +379,14 @@ func builder(task *Task) {
 		}
 		args = append(args, task.TargetDB, x)
 		cmd = exec.Command("sudo", args...)
+		outputAsBytes, err := cmd.CombinedOutput()
 		if DebugMode {
-			LogInfoln("sudo " + strings.Join(args, " "))
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
+			LogInfoln("sudo " + strings.Join(args, " ") + " done")
+			fmt.Print(string(outputAsBytes))
 		}
-		err = cmd.Run()
 		if err != nil {
 			LogWarnln("Can not finish job for package \"" + task.Package + "\": " + err.Error())
+			writeFailLog(task.Package, outputAsBytes)
 			return
 		}
 	}
@@ -353,6 +405,7 @@ func main() {
 	c := cron.New(cron.WithChain(cron.SkipIfStillRunning(cron.DefaultLogger)), cron.WithSeconds())
 	for _, x := range Tasks {
 		c.AddFunc(x.Schedule, func() { builder(&x) })
+		LogInfoln("Added task " + x.Package + " targeted to " + path.Base(x.TargetDB) + " with schedule " + x.Schedule)
 		if !SkipInitBuild && !x.SkipInitBuild {
 			LogInfoln("Started inital build of package " + x.Package)
 			builder(&x)
