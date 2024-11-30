@@ -14,7 +14,7 @@ Please use the Chinese version, sorry for that...
 
 ### 版本信息
 
-当前版本: 0.0.1, 代号: UiharuKazari (初春饰利).
+当前版本: 0.0.2, 代号: UiharuKazari (初春饰利).
 
 ## 用法
 
@@ -36,6 +36,7 @@ repo-donkey -c test.conf
 
 ``` text
 -c --config: 指定要使用的配置文件. 这是必需的.
+-l --logdir: 指定存放日志的目录. 这是必需的.
 --no-color: 禁用颜色输出. 这可能对某些东西如Paru无效.
 -s --sikp-init-build: 跳过启动后进行的一次非并行构建.
 --debug: 调试模式.

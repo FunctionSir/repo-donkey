@@ -2,7 +2,7 @@
  * @Author: FunctionSir
  * @License: AGPLv3
  * @Date: 2024-11-16 23:40:46
- * @LastEditTime: 2024-11-29 20:31:52
+ * @LastEditTime: 2024-11-30 21:50:38
  * @LastEditors: FunctionSir
  * @Description: -
  * @FilePath: /repo-donkey/main.go
@@ -67,7 +67,11 @@ var DebugMode bool = false
 
 // For tmp files
 var TmpFiles []string
+
+// Locks
 var TmpFilesLock sync.Mutex
+var ParuLock sync.Mutex
+var RepoAddLock sync.Mutex
 
 func LogFatalln(s string) {
 	c := color.New(color.FgHiRed, color.Underline)
@@ -118,6 +122,7 @@ func ValueToBool(s string) (bool, error) {
 func printHelp() {
 	fmt.Println("Help of repo-donkey:")
 	fmt.Println("-c --config: Specify config file to use.")
+	fmt.Println("-l --logdir: Specify the dir that will put logs in.")
 	fmt.Println("--no-color: Disable color output (may not affect paru or others).")
 	fmt.Println("-s --sikp-init-build: Skip init build.")
 	fmt.Println("--debug: Enable debug features.")
@@ -307,7 +312,9 @@ func builder(task *Task) {
 	}
 	args = append(args, "--clonedir", task.CloneDir, "-S", task.Package)
 	cmd = exec.Command(program, args...)
+	ParuLock.Lock()
 	outputAsBytes, err := cmd.CombinedOutput()
+	ParuLock.Unlock()
 	if DebugMode {
 		LogInfoln(program + " " + strings.Join(args, " ") + " done")
 		fmt.Print(string(outputAsBytes))
@@ -379,7 +386,9 @@ func builder(task *Task) {
 		}
 		args = append(args, task.TargetDB, x)
 		cmd = exec.Command("sudo", args...)
+		RepoAddLock.Lock()
 		outputAsBytes, err := cmd.CombinedOutput()
+		RepoAddLock.Unlock()
 		if DebugMode {
 			LogInfoln("sudo " + strings.Join(args, " ") + " done")
 			fmt.Print(string(outputAsBytes))
