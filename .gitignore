@@ -27,5 +27,8 @@ go.work.sum
 # VSCode dir
 .vscode/
 
-# Config files for testing
+# Built binaries and files for testing
+repo-donkey
 test.conf
+temp/
+testrepo/
