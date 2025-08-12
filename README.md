@@ -2,7 +2,7 @@
  * @Author: FunctionSir
  * @License: AGPLv3
  * @Date: 2025-07-28 10:48:27
- * @LastEditTime: 2025-08-02 21:03:14
+ * @LastEditTime: 2025-08-02 22:49:37
  * @LastEditors: FunctionSir
  * @Description: -
  * @FilePath: /repo-donkey/README.md
@@ -37,7 +37,11 @@ Please use the Chinese version, sorry for that...
 
 ### 安全警示
 
-恶意的PKGBUILD可能会造成安全问题, 请保证您可以确保相关PKGBUILD的安全性! 请务必多关注相关新闻或消息! 建议使用容器或虚拟机运行本程序以进一步保证安全性!
+恶意的PKGBUILD可能会造成安全问题, 请保证您可以确保相关PKGBUILD的安全性! 请务必多关注相关新闻或消息! 建议使用虚拟机运行本程序以进一步保证安全性!
+
+### 注意
+
+当前版本暂时不支持非特权容器内使用. 为确保安全, 建议使用虚拟机运行.
 
 ### 先决条件
 

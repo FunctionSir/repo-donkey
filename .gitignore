@@ -29,6 +29,6 @@ go.work.sum
 
 # Built binaries and files for testing
 repo-donkey
-test.conf
+test*.conf
 temp/
 testrepo/

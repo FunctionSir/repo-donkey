@@ -2,7 +2,7 @@
  * @Author: FunctionSir
  * @License: AGPLv3
  * @Date: 2025-07-29 16:22:12
- * @LastEditTime: 2025-08-02 20:54:05
+ * @LastEditTime: 2025-08-09 00:38:15
  * @LastEditors: FunctionSir
  * @Description: -
  * @FilePath: /repo-donkey/build.go
@@ -50,20 +50,29 @@ func PkgPkgbuild(pkg *Package) string {
 	return path.Join(PkgBuildingDir(pkg), "PKGBUILD")
 }
 
-func initWorkingDirs() {
+func initWorkingDirs(limiter chan struct{}) {
 	LogInfo("init working dirs...")
 	Check(os.MkdirAll(Conf.WorkingDir, os.ModePerm))
 	Check(os.MkdirAll(BuildingDir(), os.ModePerm))
 	Check(os.MkdirAll(LogsDir(), os.ModePerm))
 	for _, pkg := range Conf.Packages {
-		Check(os.MkdirAll(PkgBuildingDir(&pkg), os.ModePerm))
-		Check(os.MkdirAll(PkgLogsDir(&pkg), os.ModePerm))
-		Check(os.MkdirAll(PkgChrootDir(&pkg), os.ModePerm))
-		if !DirExists(PkgRootDir(&pkg)) {
-			Check(SudoRun(Conf.BuildUser, Conf.BuildGroup, path.Join(PkgLogsDir(&pkg), LOG_FILE_MKARCHROOT),
-				BIN_MKARCHROOT, PkgRootDir(&pkg), "base-devel"))
-		}
+		limiter <- struct{}{}
+		JobsWg.Add(1)
+		go func() {
+			defer JobsWg.Done()
+			defer func() { <-limiter }()
+			LogInfo("start to init the working dir for package \"" + pkg.Name + "\"")
+			Check(os.MkdirAll(PkgBuildingDir(&pkg), os.ModePerm))
+			Check(os.MkdirAll(PkgLogsDir(&pkg), os.ModePerm))
+			Check(os.MkdirAll(PkgChrootDir(&pkg), os.ModePerm))
+			if !DirExists(PkgRootDir(&pkg)) {
+				Check(SudoRun(Conf.BuildUser, Conf.BuildGroup, path.Join(PkgLogsDir(&pkg), LOG_FILE_MKARCHROOT),
+					BIN_MKARCHROOT, PkgRootDir(&pkg), "base-devel"))
+			}
+			LogInfo("successfully inited working dir for package \"" + pkg.Name + "\"")
+		}()
 	}
+	JobsWg.Wait()
 	LogInfo("all working dirs inited")
 }
 
@@ -141,23 +150,44 @@ func PreBuildPrepare(pkg *Package) (string, bool, error) {
 }
 
 func BuildPkg(pkg *Package, logFile string) error {
+	if pkg.PreBuild != "" {
+		toPreBuildRun := make([]string, 0)
+		toPreBuildRun = append(toPreBuildRun, BIN_BASH)
+		toPreBuildRun = append(toPreBuildRun, "-c")
+		toPreBuildRun = append(toPreBuildRun, pkg.PreBuild)
+		err := SudoRun(Conf.BuildUser, Conf.BuildGroup, logFile, toPreBuildRun[0], toPreBuildRun[1:]...)
+		if err != nil {
+			return err
+		}
+	}
 	toRun := make([]string, 0)
 	toRun = append(toRun, BIN_BASH)
 	toRun = append(toRun, "-c")
 	cmdStr := fmt.Sprintf("cd %s;", PkgBuildingDir(pkg)) + " "
-	if pkg.BuildProxy != "" {
-		cmdStr += fmt.Sprintf("ALL_PROXY=%s HTTP_PROXY=%s HTTPS_PROXY=%s all_proxy=%s http_proxy=%s https_proxy=%s",
-			pkg.BuildProxy, pkg.BuildProxy, pkg.BuildProxy, pkg.BuildProxy, pkg.BuildProxy, pkg.BuildProxy) + " "
-	}
 	cmdStr += BIN_SUDO + " "
-	cmdStr += "-u" + Conf.BuildUser + " "
-	cmdStr += "-g" + Conf.BuildGroup + " "
+	cmdStr += "-u " + Conf.BuildUser + " "
+	cmdStr += "-g " + Conf.BuildGroup + " "
 	cmdStr += BIN_MAKECHROOTPKG + " "
 	cmdStr += "-c -r" + " "
 	cmdStr += DIR_CHROOT
+	if pkg.BuildProxy != "" {
+		cmdStr += fmt.Sprintf(" -- ALL_PROXY=%s HTTP_PROXY=%s HTTPS_PROXY=%s all_proxy=%s http_proxy=%s https_proxy=%s",
+			pkg.BuildProxy, pkg.BuildProxy, pkg.BuildProxy, pkg.BuildProxy, pkg.BuildProxy, pkg.BuildProxy) + " "
+	}
 	toRun = append(toRun, cmdStr)
 	cmd := exec.Command(toRun[0], toRun[1:]...)
-	return RunWithLog(cmd, toRun, logFile)
+	err := RunWithLog(cmd, toRun, logFile)
+	if err != nil {
+		return err
+	}
+	if pkg.PostBuild != "" {
+		toPostBuildRun := make([]string, 0)
+		toPostBuildRun = append(toPostBuildRun, BIN_BASH)
+		toPostBuildRun = append(toPostBuildRun, "-c")
+		toPostBuildRun = append(toPostBuildRun, pkg.PostBuild)
+		err = SudoRun(Conf.BuildUser, Conf.BuildGroup, logFile, toPostBuildRun[0], toPostBuildRun[1:]...)
+	}
+	return err
 }
 
 func PostBuildOps(pkg *Package, logFile string) error {

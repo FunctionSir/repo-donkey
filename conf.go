@@ -2,7 +2,7 @@
  * @Author: FunctionSir
  * @License: AGPLv3
  * @Date: 2025-07-28 21:00:43
- * @LastEditTime: 2025-08-02 20:56:09
+ * @LastEditTime: 2025-08-03 22:34:51
  * @LastEditors: FunctionSir
  * @Description: -
  * @FilePath: /repo-donkey/conf.go
@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -37,15 +38,21 @@ const (
 	KEY_MAKEPKG_CONF string = "MakepkgConf"
 	KEY_PACMAN_CONF  string = "PacmanConf"
 	KEY_DEBUG_MODE   string = "DebugMode"
+	KEY_PRIORITY     string = "Priority"
 	KEY_PKGBUILD     string = "PKGBUILD"
+	KEY_PRE_BUILD    string = "PreBuild"
+	KEY_POST_BUILD   string = "PostBuild"
 )
 
 const (
-	DIR_PKGBUILDS string = "PKGBUILDs"
-	DIR_BUILDING  string = "building"
-	DIR_LOGS      string = "logs"
-	DIR_CHROOT    string = "chroot"
-	DIR_ROOT      string = "root"
+	DIR_BUILDING string = "building"
+	DIR_LOGS     string = "logs"
+	DIR_CHROOT   string = "chroot"
+	DIR_ROOT     string = "root"
+)
+
+const (
+	PH_PKG_NAME string = "<!!PKG_NAME!!>"
 )
 
 const (
@@ -62,21 +69,27 @@ type Package struct {
 	Name       string
 	PKGBUILD   string
 	BuildProxy string
+	PreBuild   string
+	PostBuild  string
+	Priority   int
 }
 
 type Config struct {
-	WorkingDir  string
-	TargetDB    string
-	BuildUser   string
-	BuildGroup  string
-	BuildProxy  string
-	MakepkgConf string
-	PacmanConf  string
-	PkgSignKey  string
-	WorkersCnt  int
-	DebugMode   bool
-	Schedule    time.Duration
-	Packages    []Package
+	WorkingDir      string
+	TargetDB        string
+	BuildUser       string
+	BuildGroup      string
+	BuildProxy      string
+	MakepkgConf     string
+	PacmanConf      string
+	PkgSignKey      string
+	GlobalPreBuild  string
+	GlobalPostBuild string
+	DefaultPriority int
+	WorkersCnt      int
+	DebugMode       bool
+	Schedule        time.Duration
+	Packages        []Package
 }
 
 var Conf Config
@@ -149,6 +162,9 @@ func getConf() {
 	Conf.MakepkgConf = ""
 	Conf.PacmanConf = ""
 	Conf.DebugMode = false
+	Conf.GlobalPreBuild = ""
+	Conf.GlobalPostBuild = ""
+	Conf.DefaultPriority = 0
 
 	if sec.HasKey(KEY_KEY) {
 		Conf.PkgSignKey = sec[KEY_KEY]
@@ -168,12 +184,28 @@ func getConf() {
 	if sec.HasKey(KEY_PACMAN_CONF) {
 		Conf.PacmanConf = sec[KEY_PACMAN_CONF]
 	}
+	if sec.HasKey(KEY_PRE_BUILD) {
+		Conf.GlobalPreBuild = sec[KEY_PRE_BUILD]
+	}
+	if sec.HasKey(KEY_POST_BUILD) {
+		Conf.GlobalPostBuild = sec[KEY_POST_BUILD]
+	}
+	if sec.HasKey(KEY_PRIORITY) {
+		Conf.DefaultPriority = ConfValToInt(sec[KEY_PRIORITY])
+	}
 	if sec.HasKey(KEY_DEBUG_MODE) {
 		Conf.DebugMode = ConfValToBool(sec[KEY_DEBUG_MODE])
 	}
 
 	for pkgName, pkgConf := range conf {
-		curPkg := Package{Name: pkgName, PKGBUILD: AUR_URL_BASE + pkgName, BuildProxy: Conf.BuildProxy}
+		curPkg := Package{
+			Name:       pkgName,
+			PKGBUILD:   AUR_URL_BASE + pkgName,
+			BuildProxy: Conf.BuildProxy,
+			PreBuild:   Conf.GlobalPreBuild,
+			PostBuild:  Conf.GlobalPostBuild,
+			Priority:   Conf.DefaultPriority,
+		}
 		if pkgName == SEC_GENERAL || pkgName == "" {
 			continue
 		}
@@ -185,6 +217,27 @@ func getConf() {
 		if pkgConf.HasKey(KEY_PROXY) {
 			curPkg.BuildProxy = pkgConf[KEY_PROXY]
 		}
+		if pkgConf.HasKey(KEY_PRE_BUILD) {
+			curPkg.PreBuild = pkgConf[KEY_PRE_BUILD]
+		}
+		if pkgConf.HasKey(KEY_POST_BUILD) {
+			curPkg.PostBuild = pkgConf[KEY_POST_BUILD]
+		}
+		if pkgConf.HasKey(KEY_PRIORITY) {
+			curPkg.Priority = ConfValToInt(pkgConf[KEY_PRIORITY])
+		}
+		curPkg.PreBuild = strings.ReplaceAll(curPkg.PreBuild, PH_PKG_NAME, pkgName)
+		curPkg.PostBuild = strings.ReplaceAll(curPkg.PostBuild, PH_PKG_NAME, pkgName)
 		Conf.Packages = append(Conf.Packages, curPkg)
 	}
+	sortFunc := func(a Package, b Package) int {
+		if a.Priority > b.Priority {
+			return -1
+		}
+		if a.Priority < b.Priority {
+			return 1
+		}
+		return 0
+	}
+	slices.SortFunc(Conf.Packages, sortFunc)
 }

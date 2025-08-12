@@ -2,7 +2,7 @@
  * @Author: FunctionSir
  * @License: AGPLv3
  * @Date: 2025-07-28 10:56:55
- * @LastEditTime: 2025-08-02 20:51:31
+ * @LastEditTime: 2025-08-03 23:50:28
  * @LastEditors: FunctionSir
  * @Description: -
  * @FilePath: /repo-donkey/main.go
@@ -102,8 +102,8 @@ func main() {
 		close(stop)
 	}()
 	getConf()
-	initWorkingDirs()
 	limiter := make(chan struct{}, Conf.WorkersCnt)
+	initWorkingDirs(limiter)
 	buildAll(limiter, stop)
 	ticker(limiter, stop)
 	LogInfo("graceful exit: waiting existing jobs...")
